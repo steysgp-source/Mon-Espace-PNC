@@ -62,6 +62,7 @@ let token = null, tokenClient = null, gsiPret = false;
 const norm = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 const colIdx = L => L.charCodeAt(0) - 65;
 const cellule = (ligne, L) => (ligne && ligne[colIdx(L)] != null ? String(ligne[colIdx(L)]).trim() : "");
+const estHeure = s => /^\d{1,2}:\d{2}$/.test(s);
 
 window.addEventListener("load", () => {
   const attendre = () => {
@@ -110,12 +111,14 @@ function dates3() {
   return [0, 1, 2].map(i => { const d = new Date(base); d.setDate(base.getDate() + i); return d; });
 }
 
-// Lecture d'une ligne du planning
-// A jour de semaine, B numéro du jour, C case I, D Bfing, E à I étapes, J Arr.,
-// K Découché, M à P MEP aller (tarif, heure départ, heure arrivée, dossier), Q à T MEP retour
+// Colonnes du planning :
+// A jour de semaine, B numéro du jour, C case I, D Bfing (ou OFF), E à I étapes,
+// J Arr., K Découché, L OK, M à P MEP aller (tarif, horaires N→O, dossier P),
+// Q à T MEP retour (tarif, horaires R→S, dossier T)
 function lireJour(d, ligne) {
   if (!ligne) return { date: d, introuvable: true };
 
+  const d_ = cellule(ligne, "D").toUpperCase();
   const etapes = ["E","F","G","H","I"]
     .map(L => cellule(ligne, L).replace(/\*/g, "").toUpperCase())
     .filter(Boolean);
@@ -123,7 +126,7 @@ function lireJour(d, ligne) {
   const trajets = etapes.filter(x => /[A-Z]{3}-[A-Z]{3}/.test(x));
 
   let type = "", label = "";
-  if (premier === "OFF" || premier === "OFD") {
+  if (d_ === "OFF" || d_ === "OFD" || premier === "OFF" || premier === "OFD") {
     type = "OFF";
   } else if (trajets.length) {
     type = "VOL";
@@ -135,8 +138,16 @@ function lireJour(d, ligne) {
     type = "SOL"; label = premier;
   }
 
-  const aller = { heure: cellule(ligne, "N"), dossier: cellule(ligne, "P") };
-  const retour = { heure: cellule(ligne, "R"), dossier: cellule(ligne, "T") };
+  const aller = {
+    depart: cellule(ligne, "N"),
+    arrivee: cellule(ligne, "O"),
+    dossier: cellule(ligne, "P")
+  };
+  const retour = {
+    depart: cellule(ligne, "R"),
+    arrivee: cellule(ligne, "S"),
+    dossier: cellule(ligne, "T")
+  };
 
   return {
     date: d,
@@ -144,12 +155,12 @@ function lireJour(d, ligne) {
     type,
     label,
     etapes: trajets.length ? etapes : [],
-    debut: cellule(ligne, "D"),
+    debut: estHeure(d_) ? d_ : "",
     fin: cellule(ligne, "J"),
     instruction: cellule(ligne, "C").toUpperCase() === "TRUE",
     decouche: cellule(ligne, "K"),
-    aller: (aller.heure || aller.dossier) ? aller : null,
-    retour: (retour.heure || retour.dossier) ? retour : null
+    aller: (aller.depart || aller.dossier) ? aller : null,
+    retour: (retour.depart || retour.dossier) ? retour : null
   };
 }
 
@@ -168,7 +179,8 @@ function horaires(j) {
 function ligneMep(m, sens) {
   if (!m) return "";
   const icone = sens === "aller" ? "🛫" : "🛬";
-  const txt = ["MEP " + sens, m.heure, m.dossier].filter(Boolean).join(" · ");
+  const heures = [m.depart, m.arrivee].filter(Boolean).join(" → ");
+  const txt = ["MEP " + sens, heures, m.dossier].filter(Boolean).join(" · ");
   return `<div class="line mep">${icone} ${txt}</div>`;
 }
 
@@ -201,8 +213,7 @@ function blocAujourdhui(j) {
 }
 
 function resumeSuivant(j) {
-  if (j.introuvable) return "—";
-  if (!j.type) return "—";
+  if (j.introuvable || !j.type) return "—";
   if (j.type === "OFF") return "🏠 OFF";
   return libelleActivite(j) + (horaires(j) ? " · " + horaires(j) : "");
 }
